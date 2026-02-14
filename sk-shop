@@ -1,0 +1,6 @@
+git init
+git add .
+git commit -m "Initial SK Shop"
+git branch -M main
+git remote add origin https://github.com/darkysharma99/sk-shop.git
+git push -u origin main
