@@ -1,0 +1,7 @@
+git init
+git add .
+git commit -m "Initial commit"
+https://github.com/darkysharma99/sk-shop.git
+git remote add origin https://github.com/darkysharma99/sk-shop.git
+git branch -M main
+git push -u origin main
