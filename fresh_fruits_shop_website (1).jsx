@@ -1,0 +1,265 @@
+import React, { useState, useEffect, useMemo } from "react";
+
+export default function SKShop() {
+  const ADMIN_HASH = "640ec552c7ba66106b9bf1bf65ec98b6081d2ece2ca9c29f14a4531434e8d742";
+  const UPI_ID = "skmanni70-12@okaxis";
+  const WHATSAPP_NUMBER = "+919906193295";
+
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [products, setProducts] = useState([]);
+  const [cart, setCart] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [newProduct, setNewProduct] = useState({ name: "", price: "", stockQty: "", category: "Fruits" });
+
+  /* ================= INITIAL DATA ================= */
+  const defaultProducts = [
+    { id: 1, name: "Apple", price: 100, stockQty: 25, category: "Fruits" },
+    { id: 2, name: "Banana", price: 60, stockQty: 30, category: "Fruits" },
+    { id: 3, name: "Mango Juice", price: 90, stockQty: 20, category: "Juices" }
+  ].map(p => ({ ...p, stock: p.stockQty > 0, image: `https://source.unsplash.com/400x300/?${encodeURIComponent(p.name)}` }));
+
+  useEffect(() => {
+    const savedProducts = localStorage.getItem("products");
+    const savedOrders = localStorage.getItem("orders");
+    const savedAdmin = localStorage.getItem("isAdmin");
+
+    setProducts(savedProducts ? JSON.parse(savedProducts) : defaultProducts);
+    setOrders(savedOrders ? JSON.parse(savedOrders) : []);
+    if (savedAdmin === "true") setIsAdmin(true);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("products", JSON.stringify(products));
+    localStorage.setItem("orders", JSON.stringify(orders));
+  }, [products, orders]);
+
+  /* ================= AUTH ================= */
+  async function hashPassword(password) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  const handleLogin = async () => {
+    const hashed = await hashPassword(passwordInput);
+    if (hashed === ADMIN_HASH) {
+      setIsAdmin(true);
+      localStorage.setItem("isAdmin", "true");
+      setPasswordInput("");
+    } else alert("Wrong Password");
+  };
+
+  const handleLogout = () => {
+    setIsAdmin(false);
+    localStorage.removeItem("isAdmin");
+  };
+
+  /* ================= ADMIN FUNCTIONS ================= */
+  const updateProduct = (id, field, value) => {
+    setProducts(products.map(p => {
+      if (p.id === id) {
+        const updated = { ...p, [field]: field === "price" || field === "stockQty" ? Number(value) : value };
+        updated.stock = updated.stockQty > 0;
+        return updated;
+      }
+      return p;
+    }));
+  };
+
+  const addNewProduct = () => {
+    if (!newProduct.name || !newProduct.price || !newProduct.stockQty) return alert("Fill all fields");
+    const newItem = {
+      id: Date.now(),
+      ...newProduct,
+      price: Number(newProduct.price),
+      stockQty: Number(newProduct.stockQty),
+      stock: Number(newProduct.stockQty) > 0,
+      image: `https://source.unsplash.com/400x300/?${encodeURIComponent(newProduct.name)}`
+    };
+    setProducts([...products, newItem]);
+    setNewProduct({ name: "", price: "", stockQty: "", category: "Fruits" });
+  };
+
+  const deleteProduct = (id) => {
+    setProducts(products.filter(p => p.id !== id));
+  };
+
+  /* ================= CART ================= */
+  const addToCart = (product) => {
+    if (!product.stock) return;
+    const existing = cart.find(i => i.id === product.id);
+    if (existing) {
+      if (existing.quantity + 1 > product.stockQty) return alert("Stock limit reached");
+      setCart(cart.map(i => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i));
+    } else setCart([...cart, { ...product, quantity: 1 }]);
+  };
+
+  const totalAmount = cart.reduce((a, i) => a + i.price * i.quantity, 0);
+
+  const confirmPayment = () => {
+    if (!cart.length) return alert("Cart Empty");
+
+    const updatedProducts = products.map(p => {
+      const item = cart.find(i => i.id === p.id);
+      if (item) {
+        const newQty = p.stockQty - item.quantity;
+        return { ...p, stockQty: newQty, stock: newQty > 0 };
+      }
+      return p;
+    });
+
+    const newOrder = {
+      id: Date.now(),
+      items: cart,
+      total: totalAmount,
+      date: new Date().toLocaleString()
+    };
+
+    setProducts(updatedProducts);
+    setOrders([...orders, newOrder]);
+    generateReceipt(newOrder);
+    setCart([]);
+  };
+
+  /* ================= RECEIPT ================= */
+  const generateReceipt = (order) => {
+    const win = window.open("", "_blank");
+    win.document.write(`
+      <html><body>
+      <h2>SK SHOP RECEIPT</h2>
+      <p>Date: ${order.date}</p>
+      <hr/>
+      ${order.items.map(i => `<p>${i.name} x${i.quantity} = ₹${i.price * i.quantity}</p>`).join("")}
+      <hr/>
+      <h3>Total: ₹${order.total}</h3>
+      <p>Paid to UPI: ${UPI_ID}</p>
+      <script>window.print()</script>
+      </body></html>
+    `);
+    win.document.close();
+  };
+
+  /* ================= FILTER ================= */
+  const filteredProducts = useMemo(() => {
+    return products.filter(p =>
+      (categoryFilter === "All" || p.category === categoryFilter) &&
+      p.name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [products, searchTerm, categoryFilter]);
+
+  const totalSales = orders.reduce((a, o) => a + o.total, 0);
+  const upiLink = `upi://pay?pa=${UPI_ID}&pn=SKShop&cu=INR`;
+  const qrURL = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(upiLink)}`;
+
+  return (
+    <div className="p-4">
+      <h1 className="text-3xl font-bold text-center">SK's SHOP</h1>
+
+      {!isAdmin ? (
+        <div className="text-center my-4">
+          <input type="password" placeholder="Admin Password" value={passwordInput}
+            onChange={e => setPasswordInput(e.target.value)} className="border p-2 mr-2" />
+          <button onClick={handleLogin} className="bg-blue-600 text-white px-3 py-2">Admin Login</button>
+        </div>
+      ) : (
+        <div className="text-center">
+          <button onClick={handleLogout} className="bg-red-600 text-white px-3 py-2">Logout Admin</button>
+          <h2 className="mt-4 font-bold">Admin Dashboard</h2>
+          <p>Total Orders: {orders.length}</p>
+          <p>Total Sales: ₹{totalSales}</p>
+
+          <div className="border p-3 mt-4 rounded">
+            <h3 className="font-semibold">Add New Product</h3>
+            <input placeholder="Name" value={newProduct.name}
+              onChange={e => setNewProduct({ ...newProduct, name: e.target.value })}
+              className="border p-1 mr-2" />
+            <input type="number" placeholder="Price" value={newProduct.price}
+              onChange={e => setNewProduct({ ...newProduct, price: e.target.value })}
+              className="border p-1 mr-2" />
+            <input type="number" placeholder="Stock" value={newProduct.stockQty}
+              onChange={e => setNewProduct({ ...newProduct, stockQty: e.target.value })}
+              className="border p-1 mr-2" />
+            <select value={newProduct.category}
+              onChange={e => setNewProduct({ ...newProduct, category: e.target.value })}
+              className="border p-1 mr-2">
+              <option>Fruits</option>
+              <option>Juices</option>
+            </select>
+            <button onClick={addNewProduct} className="bg-green-600 text-white px-3 py-1">Add</button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-3 mt-4 justify-center">
+        {["All", "Fruits", "Juices"].map(cat => (
+          <button key={cat}
+            onClick={() => setCategoryFilter(cat)}
+            className={`px-4 py-2 rounded ${categoryFilter === cat ? "bg-green-600 text-white" : "bg-gray-200"}`}>
+            {cat}
+          </button>
+        ))}
+      </div>
+
+      <input type="text" placeholder="Search..." value={searchTerm}
+        onChange={e => setSearchTerm(e.target.value)}
+        className="border p-2 rounded w-full mt-4" />
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+        {filteredProducts.map(product => (
+          <div key={product.id} className="border rounded-xl p-3 shadow">
+            <img src={product.image} alt={product.name}
+              className="h-40 w-full object-cover rounded-lg" />
+
+            {isAdmin ? (
+              <>
+                <input value={product.name}
+                  onChange={e => updateProduct(product.id, "name", e.target.value)}
+                  className="border p-1 w-full mt-2" />
+                <input type="number" value={product.price}
+                  onChange={e => updateProduct(product.id, "price", e.target.value)}
+                  className="border p-1 w-full mt-1" />
+                <input type="number" value={product.stockQty}
+                  onChange={e => updateProduct(product.id, "stockQty", e.target.value)}
+                  className="border p-1 w-full mt-1" />
+                <button onClick={() => deleteProduct(product.id)}
+                  className="bg-red-500 text-white px-2 py-1 mt-2">Delete</button>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-semibold mt-2">{product.name}</h2>
+                <p>₹{product.price}</p>
+                <p>{product.stockQty} available</p>
+              </>
+            )}
+
+            <button onClick={() => addToCart(product)}
+              disabled={!product.stock}
+              className="mt-2 bg-green-600 text-white px-3 py-1 rounded disabled:bg-gray-400">
+              {product.stock ? "Add to Cart" : "Out of Stock"}
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {cart.length > 0 && (
+        <div className="mt-8 border p-4 rounded-xl">
+          <h2 className="text-xl font-bold">Checkout</h2>
+          <p>Total: ₹{totalAmount}</p>
+          <a href={`https://wa.me/${WHATSAPP_NUMBER.replace("+", "")}?text=I want to order items worth ₹${totalAmount}`} 
+             className="block text-green-600 underline mt-2">Order via WhatsApp</a>
+        </div>
+      )}
+
+      <div className="mt-12 text-center border-t pt-6">
+        <h3 className="font-bold">Scan & Pay via UPI</h3>
+        <img src={qrURL} alt="UPI QR" className="mx-auto mt-2" />
+        <p>UPI ID: {UPI_ID}</p>
+        <p>WhatsApp Orders: {WHATSAPP_NUMBER}</p>
+      </div>
+    </div>
+  );
+}
